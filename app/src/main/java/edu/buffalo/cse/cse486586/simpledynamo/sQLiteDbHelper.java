@@ -27,7 +27,7 @@ public class sQLiteDbHelper extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         String keyCol = "key";
         String valCol = "value";
-        String createTable ="CREATE TABLE "+DB_NAME+ " (" +keyCol + " TEXT, " +valCol + " TEXT "+");";
+        String createTable ="CREATE TABLE "+DB_NAME+ " (" +keyCol  + " TEXT PRIMARY KEY, " +valCol + " TEXT "+");";
         db.execSQL(createTable);
         Log.v(TAG, DB_NAME+" table created");
     }

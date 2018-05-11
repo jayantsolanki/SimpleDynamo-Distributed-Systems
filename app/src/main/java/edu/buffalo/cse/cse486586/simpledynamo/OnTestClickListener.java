@@ -44,8 +44,8 @@ public class OnTestClickListener implements OnClickListener {
         ContentValues[] cv = new ContentValues[TEST_CNT];
         for (int i = 0; i < TEST_CNT; i++) {
             cv[i] = new ContentValues();
-            cv[i].put(KEY_FIELD, "key" + Integer.toString(i));
-            cv[i].put(VALUE_FIELD, "val" + Integer.toString(i));
+            cv[i].put(KEY_FIELD, "key" + "24iWls8xS8xRrmguEiKmZMjGeJWYEDNq");
+            cv[i].put(VALUE_FIELD, "val" + "VULmTY7GP5OM1tWg3X7IGui5P6Z3eXtq");
         }
 
         return cv;
