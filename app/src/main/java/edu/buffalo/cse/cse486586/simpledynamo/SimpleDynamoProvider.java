@@ -23,7 +23,6 @@ import android.net.Uri;
 
 //SQLite
 import android.database.sqlite.SQLiteDatabase;
-import android.content.ContentUris;
 
 //others
 import android.os.AsyncTask;
@@ -52,11 +51,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	private Cursor results;
 	private String avdId;
 	private int FLAG = 1;
-    private int mode = 0;//0 for normal query, 1 for global recall
-    private boolean waitInsert = false;
-	private boolean insertFlag = false;
+	private int RESTOREFLAG = 1;
     private boolean deleteFlag = false;
-    private boolean queryFlag = false;
 	private int nodeIndex = -1;
 	static final int SERVER_PORT = 10000;
 	//build URI
@@ -93,6 +89,46 @@ public class SimpleDynamoProvider extends ContentProvider {
             Log.v("Viwing Cursor results","Key: "+returnKey+" Value: "+returnValue);
         }
         res.close();
+    }
+
+    //helper function for checking if the device is head, successor or 2nd successor
+    public Boolean checkPosition(int index) {
+        if(index==nodeIndex)
+            return true;
+        else{
+            int div = nodeIndex-index;
+            int temp = 0;
+            Log.d("Diff", Integer.toString(div));
+            if(div<=2 && index<=nodeIndex)
+                return true;
+            temp = index+1;//first successor
+            if(temp==5)
+                temp=0;
+            if(nodeIndex==temp)
+                return true;
+            temp = index+2;
+            if(temp==5)
+                temp=0;
+            if(temp==6)
+                temp=1;
+            if(nodeIndex==temp)
+                return true;
+//            else if(index==4)
+//            {
+//                if(nodeIndex==0)
+//                    return true;
+//                if(nodeIndex==1)
+//                    return true;
+//            }
+//            else if(index==3)
+//            {
+//                if(nodeIndex==4)
+//                    return true;
+//                if(nodeIndex==0)
+//                    return true;
+//            }
+        }
+        return false;
     }
 
 
@@ -168,6 +204,7 @@ public class SimpleDynamoProvider extends ContentProvider {
         Log.d(TAG, nodeId);
         nodeIndex = findIndex(avdId);
         Log.d(TAG, Integer.toString(nodeIndex));
+        new ClientRestoreTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"restore");
         // starting server listener
         try {
             /*
@@ -192,6 +229,10 @@ public class SimpleDynamoProvider extends ContentProvider {
             Log.e(TAG, "Can't create a ServerSocket");
             return false;
         }
+//        long startTime = System.currentTimeMillis(); //fetch starting time
+//        while(false||(System.currentTimeMillis()-startTime)<1000);
+
+
         return true;
     }
 
@@ -310,7 +351,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
 						String sortOrder) {
-//	    while(waitInsert);
+//	    while(RESTOREFLAG==0);//wait till restoration is complete
         SQLiteDatabase db = objDbHelper.getReadableDatabase();
 //        if(mode==0)
 //		    matrixCursor = new MatrixCursor(new String[] { "key", "value" });
@@ -322,8 +363,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 //            Log.d("queryselect released", selection);
 //        FLAG=0;
         int getIndex = -1;
-        mode = 0;
-
 		//no particular order of  results, or columns defined
 		String Selection;
 		if(selection == null) {
@@ -335,22 +374,30 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 		else if(selection.equals("*")){
             FLAG=0;
-            matrixCursor = new MatrixCursor(new String[] { "key", "value" });
+//            matrixCursor = new MatrixCursor(new String[] { "key", "value" });
 			Log.d("queryselect", "Query, I am *");
 //            selectionArgs = new String[]{selection};
 			Selection = null;
 			selectionArgs = null;
 //            Selection = "key" + " = ?";
 
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"globalData", avdId);
-            long startTime = System.currentTimeMillis(); //fetch starting time
-            while(FLAG==0);
-            while(false||(System.currentTimeMillis()-startTime)<200);
-            results = db.query(table, projection, Selection, selectionArgs, null, null, null);
-            mergeCursor = new MergeCursor(new Cursor[] { matrixCursor, results });
-            //you can check for duplicates here before proceeding to return data
-            mode = 0;
-            return mergeCursor;
+//            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"globalData", avdId);
+//            long startTime = System.currentTimeMillis(); //fetch starting time
+//            while(FLAG==0);
+//            while(false||(System.currentTimeMillis()-startTime)<200);
+            try {
+                results = new ClientFetchGlobalTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "globalData", avdId, portMap[1], selection).get();
+            }
+            catch (InterruptedException e) {
+                Log.e(TAG, "Interruption occurrred during Global selection query");
+            }
+            catch (ExecutionException e) {
+                Log.e(TAG, "Execution stoppage occurrred during Global selection query");
+            }
+            catch (Exception e) {
+                Log.e(TAG, "Unknown exception occurrred during Global selection query");
+            }
+            return results;
 
 
 		}
@@ -367,14 +414,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			Log.d("queryselectinside", selection);
 			selectionArgs = new String[]{selection};//had to to this coz selection alone was not working
 			Selection = "key" + " = ?";
-//            if(queryFlag){
-//            results = db.query(table, projection, Selection, selectionArgs, null, null, null);
-//            if(results.getCount()>0) {
-//                Log.d("queryselectinsidefound", selection);
-//                results.moveToLast();
-//                return results;
-//            }
-//            }
+
             try {
                 getIndex = findHashIndex(genHash(selection));
 //                Log.v("Check position", "For key: "+selection+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
@@ -472,10 +512,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 
     @Override
     public Uri insert(Uri uri, ContentValues values) {// for insertion of new data
-        SQLiteDatabase db = objDbHelper.getWritableDatabase();
+//        SQLiteDatabase db = objDbHelper.getWritableDatabase();
 //        long rowId;
         int getIndex = -1;
-        waitInsert = true;
         try {
             getIndex = findHashIndex(genHash(values.get("key").toString()));
             Log.v("Check position", "For key: "+values.get("key").toString()+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
@@ -486,6 +525,7 @@ public class SimpleDynamoProvider extends ContentProvider {
         }
         if(getIndex==nodeIndex){//store in the same device and forward it to its two successor devices
 //            rowId = db.insertOrThrow(table, null, values);
+            SQLiteDatabase db = objDbHelper.getWritableDatabase();
             db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
             getContext().getContentResolver().notifyChange(uri, null);
             Log.v("Inserted key-val pair", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
@@ -571,7 +611,6 @@ public class SimpleDynamoProvider extends ContentProvider {
         }
 //        long startTime = System.currentTimeMillis(); //fetch starting time
 //        while(false||(System.currentTimeMillis()-startTime)<1000);
-        waitInsert=false;
         return uri;
     }
 
@@ -625,7 +664,7 @@ public class SimpleDynamoProvider extends ContentProvider {
     //                        Log.d(TAG,"Msg value received "+msgArray[2]);
                             // checking for data entry
                             try {
-                                SQLiteDatabase db = objDbHelper.getReadableDatabase();
+                                SQLiteDatabase db = objDbHelper.getWritableDatabase();
                                 db.execSQL("INSERT OR REPLACE INTO " + table + " (key,value) VALUES(\"" + msgArray[2] + "\",\"" + msgArray[3] + "\")");
     //                            getContext().getContentResolver().notifyChange(uri, null);
     //                            cv.put("key", msgArray[2]);
@@ -659,7 +698,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                                 }
                                 resultCursor.close();
                             } catch (Exception e) {
-                                Log.e(TAG, "Some error occurred");
+                                Log.e(TAG, "Some error occurred while sending the Global Data");
                             }
 
 
@@ -680,7 +719,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                                 ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
                                 output.writeObject(msgToSend.toString());//sending the string object
                                 output.flush();
-                                Log.d("Data Found", "Data not found for key" + msgArray[2] + " , returning back");
+                                Log.d("Data not Found", "Data not found for key" + msgArray[2] + " , returning back");
                             }
                             else {
                                 try {
@@ -711,21 +750,41 @@ public class SimpleDynamoProvider extends ContentProvider {
                                 }
                             }
 
-    //						while (resultCursor.moveToNext()) {
-    //							int keyIndex = resultCursor.getColumnIndex("key");
-    //							int valueIndex = resultCursor.getColumnIndex("value");
-    //							String returnKey = resultCursor.getString(keyIndex);
-    //							String returnValue = resultCursor.getString(valueIndex);
-    //                            Log.d(TAG, "Data: "+returnKey);
-    //							if(returnKey.equals(msgArray[2])){
-    //								new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"sendingData", msgArray[1], avdId, returnKey, returnValue);
-    //								Log.d(TAG, "Data found "+returnKey+" , returning back");
-    ////								resultCursor.close();
-    //								return;
-    //							}
-    //
-    //						}
-    //						resultCursor.close();
+                        }
+
+                        if (msgArray[0].equals("restoreData")) {//seek query message
+                            Log.d(TAG, "Restore message initiated by " + msgArray[1]);
+                            Cursor resultCursor = query(mUri, null,
+                                    "@", null, null);
+                            if(resultCursor.getCount()==0){
+                                StringBuffer msgToSend = new StringBuffer("Null");
+                                ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                                output.writeObject(msgToSend.toString());//sending the string object
+                                output.flush();
+                                Log.d("Restore Data not Found", "Restore Data not found for key, returning back");
+                            }
+                            //else
+                            try {
+                                ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());
+                                while (resultCursor.moveToNext()) {
+                                    int keyIndex = resultCursor.getColumnIndex("key");
+                                    int valueIndex = resultCursor.getColumnIndex("value");
+                                    String returnKey = resultCursor.getString(keyIndex);
+                                    String returnValue = resultCursor.getString(valueIndex);
+                                    Log.d(TAG, "Transmitting local Data from DHT to " + msgArray[1]+" "+returnKey);
+                                    StringBuffer msgToSend = new StringBuffer("sendingData");
+                                    msgToSend.append(":" + avdId);
+                                    msgToSend.append(":" + returnKey);
+                                    msgToSend.append(":" + returnValue);
+                                    //creating the outputstream for sending the objectified version of the string message received from the textbox
+                                    output.writeObject(msgToSend.toString());//sending the string object
+//                                    output.flush();
+                                }
+                            resultCursor.close();
+                                output.writeObject("Null");//end of keys
+                            } catch (Exception e) {
+                                Log.e("Exception in query", "Exception occurred while sending restore data back, key");
+                            }
 
                         }
 
@@ -768,9 +827,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 				catch (ClassNotFoundException e) {
 					Log.e("Listerner Server Error", "ServerTask ClassNotFoundException");
 				}
-//                catch(Exception e){
-//                    Log.e(TAG,"Unknown Exception in Server Task");
-//                }
+                catch(Exception e){
+                    Log.e(TAG,"Unknown Exception in Server Task");
+                }
 			} //while(!socket.isInputShutdown());, end of while
 
 //			return null;
@@ -981,9 +1040,6 @@ public class SimpleDynamoProvider extends ContentProvider {
                     output.writeObject(msgToSend.toString());//sending the string object
                     ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
                     String msg = (String) input.readObject();
-//                    while(msg!=null)
-//                    input.close();
-                    Log.d(TAG,"Message received from server "+msg);
 
                     Log.d(TAG,"Queried Data received "+msg);
                     String []msgArray = msg.split(":");
@@ -999,12 +1055,15 @@ public class SimpleDynamoProvider extends ContentProvider {
 
                 } catch (UnknownHostException e) {
                     Log.e(TAG, "ClientFetchQuery UnknownHostException in Fetching key "+msgs[3]);
+                    return tempCursor;
                 }
                 catch (SocketTimeoutException e) {
-                    Log.e(TAG, "ClientFetchQuery socket IOException in Fetching key "+msgs[3]);
+                    Log.e(TAG, "ClientFetchQuery socket SocketTimeoutException in Fetching key "+msgs[3]);
+                    return tempCursor;
                 }
                 catch (IOException e) {
                     Log.e(TAG, "ClientFetchQuery socket IOException in Fetching key "+msgs[3]);
+                    return tempCursor;
                 }
                 catch (Exception e) {
                     Log.e(TAG, "Something wrong real wrong while requesting query data");
@@ -1015,6 +1074,164 @@ public class SimpleDynamoProvider extends ContentProvider {
             }
             Log.d("querycount for key "+msgs[3], "tempcursor "+Integer.toString(tempCursor.getCount()));
             return null;
+        }
+    }
+    /***
+     * ClientTask is an AsyncTask that should send a string over the network.
+     * It is created by ClientTask.executeOnExecutor() call whenever OnKeyListener.onKey() detects
+     * an enter key press event.
+     *
+     * @author stevko
+     *
+     */
+    private class ClientRestoreTask extends AsyncTask<String, Void, Void> {
+
+        @Override
+        protected Void doInBackground(String... msgs) {
+            String msg1 = msgs[0];
+
+            if (msg1.equals("restore")) {//create packet for forwarding data, forwardData:key:value
+                delete(mUri,"@", null);
+
+//                try {
+                    int getIndex = -1;
+                    Log.d(TAG, "Starting restoration ");
+                    StringBuffer msgToSend = new StringBuffer("restoreData");
+                    msgToSend.append(":"+avdId);
+                    SQLiteDatabase db = objDbHelper.getWritableDatabase();//important
+                    for(int i = 0; i<5; i++)
+                    {
+                        Log.d("Iterating" ,"Port "+ portMap[i]);
+                        try {
+                            if (portMap[i].compareToIgnoreCase(avdId) == 0)
+                                continue;
+                            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                    Integer.parseInt(portMap[i]) * 2);
+                            ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                            output.writeObject(msgToSend.toString());//sending the string object
+                            ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+                            try{
+                                while(true){
+                                    String msg = (String) input.readObject();
+//                                    Log.d(TAG,"Restored Data received "+msg+" from");
+                                    String []msgArray = msg.split(":");
+                                    if(msgArray[0].compareToIgnoreCase("Null")!=0)
+                                    {
+                                        getIndex = findHashIndex(genHash(msgArray[2]));
+                                        Boolean check = checkPosition(getIndex);
+//                                        Log.v("Check position status: "+Boolean.toString(checkPosition(getIndex)), "For key: "+msgArray[2]+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
+                                        Log.d(TAG, "Returned values for restoration "+msgArray[2]+" "+msgArray[3]);
+
+                                        if(check){//main node
+
+                                            db.execSQL("INSERT OR REPLACE INTO " + table + " (key,value) VALUES(\"" + msgArray[2] + "\",\"" + msgArray[3] + "\")");
+
+                                        }
+
+                                        getIndex = -1;
+                                    }
+                                    else//get out of loop and move to other port
+                                        break;
+                                }
+                            }
+                            catch (Exception e){
+                                Log.e("Coming out of loop","yeah");
+                            }
+
+
+
+//                            long startTime = System.currentTimeMillis(); //fetch starting time
+//                            while(false||(System.currentTimeMillis()-startTime)<20);
+//                        output.close();//this is causing IOexception in server side
+//                            socket.close();//bug bug bug
+                        } catch (UnknownHostException e) {
+                            Log.e(TAG, "ClientRestoreTask UnknownHostException");
+                        } catch (IOException e) {
+                            Log.e(TAG, "ClientRestoreTask socket IOException");
+                        }
+
+                    }
+
+            }
+            return null;
+        }
+    }
+    /***
+     * ClientTask is an AsyncTask that should send a string over the network.
+     * It is created by ClientTask.executeOnExecutor() call whenever OnKeyListener.onKey() detects
+     * an enter key press event.
+     *
+     * @author stevko
+     *
+     */
+    private class ClientFetchGlobalTask extends AsyncTask<String, Void, MatrixCursor> {
+
+        @Override
+        protected MatrixCursor doInBackground(String... msgs) {
+            String msg1 = msgs[0];
+            MatrixCursor tempCursor = new MatrixCursor(new String[] { "key", "value" });
+            if (msg1.equals("globalData")) {//create packet for forwarding data, forwardData:key:value
+
+//                try {
+                int getIndex = -1;
+
+                Log.d(TAG, "Starting Global Fetching ");
+                StringBuffer msgToSend = new StringBuffer("restoreData");
+                msgToSend.append(":"+avdId);
+                SQLiteDatabase db = objDbHelper.getWritableDatabase();//important
+                for(int i = 0; i<5; i++)
+                {
+                    Log.d("Iterating" ,"Port "+ portMap[i]);
+                    try {
+//                        if (portMap[i].compareToIgnoreCase(avdId) == 0)
+//                            continue;
+                        Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(portMap[i]) * 2);
+                        ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                        output.writeObject(msgToSend.toString());//sending the string object
+                        ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+                        try{
+                            while(true){
+                                String msg = (String) input.readObject();
+//                                    Log.d(TAG,"Restored Data received "+msg+" from");
+                                String []msgArray = msg.split(":");
+                                if(msgArray[0].compareToIgnoreCase("Null")!=0)
+                                {
+                                    getIndex = findHashIndex(genHash(msgArray[2]));
+                                    Boolean check = checkPosition(getIndex);
+//                                        Log.v("Check position status: "+Boolean.toString(checkPosition(getIndex)), "For key: "+msgArray[2]+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
+                                    Log.d(TAG, "Returned values for global query "+msgArray[2]+" "+msgArray[3]);
+
+                                    if(true){//main node
+                                        tempCursor.addRow(new Object[]{msgArray[2], msgArray[3]});
+                                    }
+
+                                    getIndex = -1;
+                                }
+                                else//get out of loop and move to other port
+                                    break;
+                            }
+                        }
+                        catch (Exception e){
+                            Log.e("Coming out of loop","yeah");
+                        }
+
+
+
+//                            long startTime = System.currentTimeMillis(); //fetch starting time
+//                            while(false||(System.currentTimeMillis()-startTime)<20);
+//                        output.close();//this is causing IOexception in server side
+//                            socket.close();//bug bug bug
+                    } catch (UnknownHostException e) {
+                        Log.e(TAG, "ClientGlobalFetchTask UnknownHostException");
+                    } catch (IOException e) {
+                        Log.e(TAG, "ClientGlobalFetchTask socket IOException");
+                    }
+
+                }
+
+            }
+            return tempCursor;
         }
     }
 }
