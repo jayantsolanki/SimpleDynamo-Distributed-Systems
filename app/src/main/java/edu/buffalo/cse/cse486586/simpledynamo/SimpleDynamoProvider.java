@@ -6,6 +6,7 @@ import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -344,7 +345,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"globalData", avdId);
             long startTime = System.currentTimeMillis(); //fetch starting time
             while(FLAG==0);
-            while(false||(System.currentTimeMillis()-startTime)<2000);
+            while(false||(System.currentTimeMillis()-startTime)<200);
             results = db.query(table, projection, Selection, selectionArgs, null, null, null);
             mergeCursor = new MergeCursor(new Cursor[] { matrixCursor, results });
             //you can check for duplicates here before proceeding to return data
@@ -363,14 +364,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 			return results;
 		}
 		else{// for particular key
-			Log.d("queryselect", selection);
-            Log.d("queryflag", Boolean.toString(queryFlag));
+			Log.d("queryselectinside", selection);
 			selectionArgs = new String[]{selection};//had to to this coz selection alone was not working
 			Selection = "key" + " = ?";
 //            if(queryFlag){
-            results = db.query(table, projection, Selection, selectionArgs, null, null, null);
-            if(results.getCount()>0)
-                return results;
+//            results = db.query(table, projection, Selection, selectionArgs, null, null, null);
+//            if(results.getCount()>0) {
+//                Log.d("queryselectinsidefound", selection);
+//                results.moveToLast();
+//                return results;
+//            }
 //            }
             try {
                 getIndex = findHashIndex(genHash(selection));
@@ -410,13 +413,39 @@ public class SimpleDynamoProvider extends ContentProvider {
                 try {
                     if (getIndex == 4) {
                         results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[1], selection).get();
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to first successor");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[0], selection).get();
+                        }
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to original node");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[4], selection).get();
+                        }
+
 //                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"queryData", avdId, portMap[1], selection);
                     } else if (getIndex == 3) {
                         results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[0], selection).get();
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to first successor");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[3 + 1], selection).get();
+                        }
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to original node");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[3], selection).get();
+                        }
 //                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"queryData", avdId, portMap[0], selection);
 
                     } else {
                         results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[getIndex + 2], selection).get();
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to first successor");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[getIndex + 1], selection).get();
+                        }
+                        if(results.getCount()==0) {
+                            Log.e(TAG, "No row returned, asking to original node");
+                            results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[getIndex], selection).get();
+                        }
+
 //                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"queryData", avdId, portMap[getIndex+2], selection);
 
                     }
@@ -442,7 +471,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 	}
 
     @Override
-    public synchronized Uri insert(Uri uri, ContentValues values) {// for insertion of new data
+    public Uri insert(Uri uri, ContentValues values) {// for insertion of new data
         SQLiteDatabase db = objDbHelper.getWritableDatabase();
 //        long rowId;
         int getIndex = -1;
@@ -483,31 +512,51 @@ public class SimpleDynamoProvider extends ContentProvider {
         }
         else{
             Log.d(TAG,values.get("key").toString()+"cannot be stored into current node, Forwarding Data to corresponding node "+Integer.toString(getIndex)+" and its successors");
-            if(getIndex==4)
+            if(getIndex==4)//successors, 0, 1
             {
-//                if(1==nodeIndex){
+//                if(nodeIndex==1){
 //                    db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
 //                    getContext().getContentResolver().notifyChange(uri, null);
-//                    Log.v("insert key-val pair", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    Log.v("Inserted key-val pair into successor", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[0], avdId, values.get("key").toString(), values.get("value").toString());
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
+//                }
+//                if(nodeIndex==0){
+//                    db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
+//                    getContext().getContentResolver().notifyChange(uri, null);
+//                    Log.v("Inserted key-val pair into successor", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[1], avdId, values.get("key").toString(), values.get("value").toString());
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
 //                }
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[1], avdId, values.get("key").toString(), values.get("value").toString());
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[0], avdId, values.get("key").toString(), values.get("value").toString());
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
 
             }
-            else if(getIndex==3)
+            else if(getIndex==3)//successors, 4, 0
             {
-//                if(0==nodeIndex){
+//                if(nodeIndex==0){//0
 //                    db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
 //                    getContext().getContentResolver().notifyChange(uri, null);
-//                    Log.v("insert key-val pair", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    Log.v("Inserted key-val pair into successor", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex+1], avdId, values.get("key").toString(), values.get("value").toString());
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
+//
+//                }
+//                if(nodeIndex==getIndex+1){//4
+//                    db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
+//                    getContext().getContentResolver().notifyChange(uri, null);
+//                    Log.v("Inserted key-val pair into successor", values.get("key").toString()+" into deviceID: "+portMap[nodeIndex]);
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[0], avdId, values.get("key").toString(), values.get("value").toString());
+//                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
+//
 //                }
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[0], avdId, values.get("key").toString(), values.get("value").toString());
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex+1], avdId, values.get("key").toString(), values.get("value").toString());
                 new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"forwardData", portMap[getIndex], avdId, values.get("key").toString(), values.get("value").toString());
 
             }
-            else
+            else//0,1,2,, 1,2,3,, 2,3,4
             {
 //                if(getIndex+2==nodeIndex){
 //                    db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+values.get("key").toString()+"\",\""+values.get("value").toString()+"\")");
@@ -554,168 +603,177 @@ public class SimpleDynamoProvider extends ContentProvider {
              */
 			Socket socket = null;
 
-			do {
+			while(true) {
 				try {
-					//accept connection from the sender and Initialize Input Stream for the code
-//                    Log.e("Server Task request", "Blocked");
-					socket = serverSocket.accept();
-//                    Log.e("Server Task request", "Unblocked");
-					ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
-					String msg = (String) input.readObject();
-//					input.close();
 
-                    String strReceived = msg;
-                    String []msgArray = strReceived.split(":");
+                        //accept connection from the sender and Initialize Input Stream for the code
+    //                    Log.e("Server Task request", "Blocked");
+                    socket = serverSocket.accept();
+                    if (socket.isConnected()) {//if connected
 
-                    if (msgArray[0].equals("forwardData")){//seek forwarded messages
-//                        Log.d(TAG,"It is a forward message");
-//                        Log.d(TAG,"Msg key received "+msgArray[1]);
-//                        Log.d(TAG,"Msg value received "+msgArray[2]);
-                        // checking for data entry
-                        try{
-                            SQLiteDatabase db = objDbHelper.getReadableDatabase();
-                            db.execSQL("INSERT OR REPLACE INTO "+table+" (key,value) VALUES(\""+msgArray[2]+"\",\""+msgArray[3]+"\")");
-//                            getContext().getContentResolver().notifyChange(uri, null);
-//                            cv.put("key", msgArray[2]);
-//                            cv.put("value", msgArray[3]);
-                            Log.d(TAG,  "Successfully added copy "+msgArray[2]+" of data to Content Provider, asked by deviceid: "+msgArray[1]);
-                        }
-                        catch (Exception e) {
-                            Log.e(TAG, "Something wrong with the Data Entry");
-                        }
-                    }
-                    if (msgArray[0].equals("sendingData")) {//receiving Local Data from remote nodes
-                        Log.d(TAG, "Local Data received " + strReceived);
-                        Log.d(TAG, "Adding key: " + msgArray[2] + " to matrixcursor");
-                        matrixCursor.addRow(new Object[]{msgArray[2], msgArray[3]});
-                        FLAG = 1;
-                    }
-                    if (msgArray[0].equals("globalData")){//part of seeking global messages
-                        Log.d(TAG,"It is a request for globaldata");
-                        Log.d(TAG,"Msg received "+strReceived);
-                        Log.d(TAG,"Msg initiated by "+msgArray[1]);
-                        Log.d(TAG,"Current avd is  "+avdId);
-                        try{
-                            Cursor resultCursor = query(mUri, null,
-                                    "@", null, null);
-                            while (resultCursor.moveToNext()) {
-                                int keyIndex = resultCursor.getColumnIndex("key");
-                                int valueIndex = resultCursor.getColumnIndex("value");
-                                String returnKey = resultCursor.getString(keyIndex);
-                                String returnValue = resultCursor.getString(valueIndex);
-//                    mTextView.append(returnKey+" "+returnValue);
-                                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"sendingData", msgArray[1], avdId, returnKey, returnValue);//sending data to the request initiater one by one
+    //                    Log.e("Server Task request", "Unblocked");
+                        ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+                        String msg = (String) input.readObject();
+    //					input.close();
+
+                        String strReceived = msg;
+                        String[] msgArray = strReceived.split(":");
+
+                        if (msgArray[0].equals("forwardData")) {//seek forwarded messages
+    //                        Log.d(TAG,"It is a forward message");
+    //                        Log.d(TAG,"Msg key received "+msgArray[1]);
+    //                        Log.d(TAG,"Msg value received "+msgArray[2]);
+                            // checking for data entry
+                            try {
+                                SQLiteDatabase db = objDbHelper.getReadableDatabase();
+                                db.execSQL("INSERT OR REPLACE INTO " + table + " (key,value) VALUES(\"" + msgArray[2] + "\",\"" + msgArray[3] + "\")");
+    //                            getContext().getContentResolver().notifyChange(uri, null);
+    //                            cv.put("key", msgArray[2]);
+    //                            cv.put("value", msgArray[3]);
+                                Log.d(TAG, "Successfully added copy " + msgArray[2] + " of data to Content Provider, asked by deviceid: " + msgArray[1]);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Something wrong with the Data Entry");
                             }
-                            resultCursor.close();
                         }
-                        catch (Exception e)
-                        {
-                            Log.e(TAG, "Some error occurred");
+                        if (msgArray[0].equals("sendingData")) {//receiving Local Data from remote nodes
+                            Log.d(TAG, "Local Data received " + strReceived);
+                            Log.d(TAG, "Adding key: " + msgArray[2] + " to matrixcursor");
+                            matrixCursor.addRow(new Object[]{msgArray[2], msgArray[3]});
+                            FLAG = 1;
                         }
-
-
-                    }
-                    if (msgArray[0].equals("queryData")){//seek query message
-                        Log.d(TAG,"Requested key received "+strReceived);
-                        Log.d(TAG,"Original Msg initiated by "+msgArray[1]);
-                        Log.d(TAG,"Requested Key is "+msgArray[2]);
-                        Log.d(TAG,"Current avd is  "+avdId);
-
-//						Cursor resultCursor = query(mUri, null,
-//								"@", null, null);
-                            queryFlag=true;
-
-                            Cursor resultCursor = query(mUri, null,
-                                    msgArray[2], null, null);
-                            while (resultCursor.moveToNext()) {
-                                int keyIndex = resultCursor.getColumnIndex("key");
-                                int valueIndex = resultCursor.getColumnIndex("value");
-                                String returnKey = resultCursor.getString(keyIndex);
-                                String returnValue = resultCursor.getString(valueIndex);
-                                Log.d(TAG, "Data: "+returnKey);
-                                if(returnKey.equals(msgArray[2])){
-                                    Log.d(TAG,"Sending local Data from DHT to "+msgArray[1]);
-                                    StringBuffer msgToSend = new StringBuffer("sendingData");
-                                    msgToSend.append(":"+msgArray[1]);
-                                    msgToSend.append(":"+returnKey);
-                                    msgToSend.append(":"+returnValue);
-                                    ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-                                    output.writeObject(msgToSend.toString());//sending the string object
-                                    output.flush();
-//                        output.close();//this is causing IOexception in server side
-//                    socket.close();//bug bug bug
-
-//                                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"sendingData", msgArray[1], avdId, returnKey, returnValue);
-                                    Log.d(TAG, "Data found "+returnKey+" , returning back");
-                                    break;
-////								resultCursor.close();
-//								return;
+                        if (msgArray[0].equals("globalData")) {//part of seeking global messages
+                            Log.d(TAG, "It is a request for globaldata");
+                            Log.d(TAG, "Msg received " + strReceived);
+                            Log.d(TAG, "Msg initiated by " + msgArray[1]);
+                            Log.d(TAG, "Current avd is  " + avdId);
+                            try {
+                                Cursor resultCursor = query(mUri, null,
+                                        "@", null, null);
+                                while (resultCursor.moveToNext()) {
+                                    int keyIndex = resultCursor.getColumnIndex("key");
+                                    int valueIndex = resultCursor.getColumnIndex("value");
+                                    String returnKey = resultCursor.getString(keyIndex);
+                                    String returnValue = resultCursor.getString(valueIndex);
+    //                    mTextView.append(returnKey+" "+returnValue);
+                                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "sendingData", msgArray[1], avdId, returnKey, returnValue);//sending data to the request initiater one by one
                                 }
-
+                                resultCursor.close();
+                            } catch (Exception e) {
+                                Log.e(TAG, "Some error occurred");
                             }
-//                        ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-//                        output.writeObject("Hola como estas");//sending the string object
-//                        output.flush();
-                            queryFlag=false;
-//						while (resultCursor.moveToNext()) {
-//							int keyIndex = resultCursor.getColumnIndex("key");
-//							int valueIndex = resultCursor.getColumnIndex("value");
-//							String returnKey = resultCursor.getString(keyIndex);
-//							String returnValue = resultCursor.getString(valueIndex);
-//                            Log.d(TAG, "Data: "+returnKey);
-//							if(returnKey.equals(msgArray[2])){
-//								new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"sendingData", msgArray[1], avdId, returnKey, returnValue);
-//								Log.d(TAG, "Data found "+returnKey+" , returning back");
-////								resultCursor.close();
-//								return;
-//							}
-//
-//						}
-//						resultCursor.close();
 
-                    }
 
-                    if (msgArray[0].equals("globalDeleteData")){//deleting Local Data from remote nodes
-                        Log.d(TAG,"Deletion Requested "+strReceived);
-                        Log.d(TAG,"Intitated by device  "+msgArray[1]);
-////					if(avdId.equals(msgArray[1])){
-////						FLAG = 1;
-////						Log.d(TAG,"Flag set");
-////						return;
-//					}
-                        delete(mUri, "@", null);
-                    }
-                    if (msgArray[0].equals("localDelete")){//request for local delete received
-                        Log.d(TAG,"Request for delete key received"+strReceived);
-                        Log.d(TAG,"Msg initiated by "+msgArray[1]);
-                        Log.d(TAG,"Requested Key is "+msgArray[2]);
-                        Log.d(TAG,"Current avd is  "+avdId);
-                        try{
-                            deleteFlag = true;
-                            delete(mUri,msgArray[2], null);
-                            deleteFlag = false;
                         }
-                        catch (Exception e)
-                        {
-                            Log.e(TAG, "Some error occurred during deleting of local key");
+                        if (msgArray[0].equals("queryData")) {//seek query message
+                            Log.d(TAG, "Requested key received " + strReceived);
+                            Log.d(TAG, "Original Msg initiated by " + msgArray[1]);
+                            Log.d(TAG, "Requested Key is " + msgArray[2]);
+                            Log.d(TAG, "Current avd is  " + avdId);
+
+                            SQLiteDatabase db = objDbHelper.getReadableDatabase();
+                            Log.d("queryselectoutside", msgArray[2]);
+                            String[] selectionArgs = new String[]{msgArray[2]};//had to to this coz selection alone was not working
+                            String Selection = "key" + " = ?";
+                            Cursor resultCursor = db.query(table, null, Selection, selectionArgs, null, null, null);
+                            if(resultCursor.getCount()==0){
+                                StringBuffer msgToSend = new StringBuffer("Null");
+                                ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                                output.writeObject(msgToSend.toString());//sending the string object
+                                output.flush();
+                                Log.d("Data Found", "Data not found for key" + msgArray[2] + " , returning back");
+                            }
+                            else {
+                                try {
+                                    while (resultCursor.moveToNext()) {
+                                        int keyIndex = resultCursor.getColumnIndex("key");
+                                        int valueIndex = resultCursor.getColumnIndex("value");
+                                        String returnKey = resultCursor.getString(keyIndex);
+                                        String returnValue = resultCursor.getString(valueIndex);
+
+                                        if (returnKey.equals(msgArray[2])) {
+                                            Log.d(TAG, "Data found: " + returnKey);
+                                            Log.d(TAG, "Sending local Data from DHT to " + msgArray[1]);
+                                            StringBuffer msgToSend = new StringBuffer("sendingData");
+                                            msgToSend.append(":" + msgArray[1]);
+                                            msgToSend.append(":" + returnKey);
+                                            msgToSend.append(":" + returnValue);
+                                            ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                                            output.writeObject(msgToSend.toString());//sending the string object
+                                            output.flush();
+                                            Log.d("Data Found", "Data found " + returnKey + " , returning back");
+                                            break;
+                                        }
+
+                                    }
+
+                                } catch (Exception e) {
+                                    Log.e("Exception in query", "Exception occurred while sending queried data back, key " + msgArray[2]);
+                                }
+                            }
+
+    //						while (resultCursor.moveToNext()) {
+    //							int keyIndex = resultCursor.getColumnIndex("key");
+    //							int valueIndex = resultCursor.getColumnIndex("value");
+    //							String returnKey = resultCursor.getString(keyIndex);
+    //							String returnValue = resultCursor.getString(valueIndex);
+    //                            Log.d(TAG, "Data: "+returnKey);
+    //							if(returnKey.equals(msgArray[2])){
+    //								new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"sendingData", msgArray[1], avdId, returnKey, returnValue);
+    //								Log.d(TAG, "Data found "+returnKey+" , returning back");
+    ////								resultCursor.close();
+    //								return;
+    //							}
+    //
+    //						}
+    //						resultCursor.close();
+
                         }
+
+                        if (msgArray[0].equals("globalDeleteData")) {//deleting Local Data from remote nodes
+                            Log.d(TAG, "Deletion Requested " + strReceived);
+                            Log.d(TAG, "Intitated by device  " + msgArray[1]);
+    ////					if(avdId.equals(msgArray[1])){
+    ////						FLAG = 1;
+    ////						Log.d(TAG,"Flag set");
+    ////						return;
+    //					}
+                            delete(mUri, "@", null);
+                        }
+                        if (msgArray[0].equals("localDelete")) {//request for local delete received
+                            Log.d(TAG, "Request for delete key received" + strReceived);
+                            Log.d(TAG, "Msg initiated by " + msgArray[1]);
+                            Log.d(TAG, "Requested Key is " + msgArray[2]);
+                            Log.d(TAG, "Current avd is  " + avdId);
+                            try {
+                                deleteFlag = true;
+                                delete(mUri, msgArray[2], null);
+                                deleteFlag = false;
+                            } catch (Exception e) {
+                                Log.e(TAG, "Some error occurred during deleting of local key");
+                            }
+                        }
+
+    //                    ObjectInputStream input = new ObjectInputStream(receMsg.getInputStream());//this create byte by byte input stream and is read
+    //                    inputMsg.append(input.readUTF())
+    //                    publishProgress(inputMsg.toString());
+                    }//if connected
+                    else{
+                        Log.d("Listerner Server no connection", "Cannot established connection");
                     }
 
-//                    ObjectInputStream input = new ObjectInputStream(receMsg.getInputStream());//this create byte by byte input stream and is read
-//                    inputMsg.append(input.readUTF())
-//                    publishProgress(inputMsg.toString());
-				} catch (IOException e) {
-					Log.e(TAG, "Listener ServerReceive IO Exception");
+				}//end of try
+				catch (IOException e) {
+					Log.e("Listerner Server Error", "Listener ServerReceive IO Exception");
 				}
 				catch (ClassNotFoundException e) {
-					Log.e(TAG, "ServerTask ClassNotFoundException");
+					Log.e("Listerner Server Error", "ServerTask ClassNotFoundException");
 				}
 //                catch(Exception e){
 //                    Log.e(TAG,"Unknown Exception in Server Task");
 //                }
-			} while(!socket.isInputShutdown());
+			} //while(!socket.isInputShutdown());, end of while
 
-			return null;
+//			return null;
 		}
 
 		protected  void onProgressUpdate(String...strings) {
@@ -770,7 +828,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 					Log.e(TAG, "ClientTask socket IOException");
 				}
 				catch (Exception e) {
-					Log.e(TAG, "Something wrong real wrong while forearding data");
+					Log.e(TAG, "Something wrong real wrong while forwarding data");
 				}
 			}
 			if (msg1.equals("globalData")) {
@@ -806,60 +864,31 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 			}
-			if (msg1.equals("sendingData")) {//sending the localdata to the called avd
-				msgToSend.append(":"+msgs[2]);
-				msgToSend.append(":"+msgs[3]);
-				msgToSend.append(":"+msgs[4]);
+            if (msg1.equals("sendingData")) {//sending the localdata to the called avd
+                msgToSend.append(":"+msgs[2]);
+                msgToSend.append(":"+msgs[3]);
+                msgToSend.append(":"+msgs[4]);
 
-				try {
-					Log.d(TAG,"Sending local Data from DHT to "+msgs[1]);
-					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-							Integer.parseInt(msgs[1])*2);
+                try {
+                    Log.d(TAG,"Sending local Data from DHT to "+msgs[1]);
+                    Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            Integer.parseInt(msgs[1])*2);
 
-					ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-					output.writeObject(msgToSend.toString());//sending the string object
-					output.flush();
+                    ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+                    output.writeObject(msgToSend.toString());//sending the string object
+                    output.flush();
 //                        output.close();//this is causing IOexception in server side
 //                    socket.close();//bug bug bug
 
-				} catch (UnknownHostException e) {
-					Log.e(TAG, "ClientTask UnknownHostException");
-				} catch (IOException e) {
-					Log.e(TAG, "ClientTask socket IOException");
-				}
-				catch (Exception e) {
-					Log.e(TAG, "Something went wrong real wrong while requesting global data");
-				}
-			}
-			if (msg1.equals("queryData")) {//Requesting query key Data from DHT
-				msgToSend.append(":"+msgs[1]);
-//				msgToSend.append(":"+msgs[2]);//miss this, its the receiver port
-                msgToSend.append(":"+msgs[3]);
-				try {
-					Log.d(TAG,"Requesting query key Data from DHT "+msgs[2]+" "+msgToSend.toString());
-					Log.d(TAG,"Requested Key is "+msgs[3]);
-					Log.d(TAG,"Asked by Avd "+msgs[1]);
-					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-							Integer.parseInt(msgs[2])*2);
-
-					ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-					output.writeObject(msgToSend.toString());//sending the string object
-					output.flush();
-//					long startTime = System.currentTimeMillis(); //fetch starting time
-//					while(false||(System.currentTimeMillis()-startTime)<20);
-//					socket.close();//bug bug bug
-
-				} catch (UnknownHostException e) {
-					Log.e(TAG, "ClientTask UnknownHostException");
-				} catch (IOException e) {
-					Log.e(TAG, "ClientTask socket IOException");
-				}
-				catch (Exception e) {
-					Log.e(TAG, "Something wrong real wrong while requesting global data");
-				}
-				//you can handle device crashes here
-
-			}
+                } catch (UnknownHostException e) {
+                    Log.e(TAG, "ClientTask UnknownHostException");
+                } catch (IOException e) {
+                    Log.e(TAG, "ClientTask socket IOException");
+                }
+                catch (Exception e) {
+                    Log.e(TAG, "Something wrong real wrong while requesting global data");
+                }
+            }
 			if (msg1.equals("globalDeleteData")) {//sending the localdata to the called avd
 					Log.d(TAG,"Requesting deletion of data from DHT globally, initiated from device "+msgs[1].toString());
 					msgToSend.append(":"+msgs[1]);
@@ -935,45 +964,12 @@ public class SimpleDynamoProvider extends ContentProvider {
             String msg1 = msgs[0];
             StringBuffer msgToSend = new StringBuffer(msg1);
             String receiverPort = new String();
-
-            if (msg1.equals("globalData")) {
-                msgToSend.append(":"+msgs[1]);
-//                msgToSend.append(":"+msgs[2]);
-//                receiverPort = msgs[2];
-
-                Log.d(TAG,"Requesting Global Data from all DHT nodes "+msgToSend.toString());
-                for(int i = 0; i<5; i++)
-                {
-                    try {
-                        if (portMap[i].compareToIgnoreCase(msgs[1]) == 0)
-                            continue;
-                        Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                                Integer.parseInt(portMap[i]) * 2);
-                        ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-                        output.writeObject(msgToSend.toString());//sending the string object
-                        output.flush();
-                        long startTime = System.currentTimeMillis(); //fetch starting time
-                        while(false||(System.currentTimeMillis()-startTime)<20);
-
-//                        output.close();//this is causing IOexception in server side
-//                            socket.close();//bug bug bug
-                    } catch (UnknownHostException e) {
-                        Log.e(TAG, "ClientFetchQuery UnknownHostException");
-                    } catch (IOException e) {
-                        Log.e(TAG, "ClientFetchQuery socket IOException");
-                    }
-                    catch (Exception e) {
-                        Log.e(TAG, "Something wrong real wrong while requesting global data");
-                    }
-                }
-
-
-            }
-
+            MatrixCursor tempCursor = new MatrixCursor(new String[] { "key", "value" });
             if (msg1.equals("queryData")) {//Requesting query key Data from DHT
                 msgToSend.append(":"+msgs[1]);
 //				msgToSend.append(":"+msgs[2]);//miss this, its the receiver port
                 msgToSend.append(":"+msgs[3]);
+
                 try {
                     Log.d(TAG,"Requesting query key Data from DHT "+msgs[2]+" "+msgToSend.toString());
                     Log.d(TAG,"Requested Key is "+msgs[3]);
@@ -985,10 +981,10 @@ public class SimpleDynamoProvider extends ContentProvider {
                     output.writeObject(msgToSend.toString());//sending the string object
                     ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
                     String msg = (String) input.readObject();
+//                    while(msg!=null)
 //                    input.close();
                     Log.d(TAG,"Message received from server "+msg);
-                    MatrixCursor tempCursor = new MatrixCursor(new String[] { "key", "value" });
-//                    matrixCursor = new MatrixCursor(new String[] { "key", "value" });
+
                     Log.d(TAG,"Queried Data received "+msg);
                     String []msgArray = msg.split(":");
                     Log.d(TAG,"Adding key: "+msgArray[2]+" to matrixcursor");
@@ -1002,17 +998,22 @@ public class SimpleDynamoProvider extends ContentProvider {
 //					socket.close();//bug bug bug
 
                 } catch (UnknownHostException e) {
-                    Log.e(TAG, "ClientFetchQuery UnknownHostException");
-                } catch (IOException e) {
-                    Log.e(TAG, "ClientFetchQuery socket IOException");
+                    Log.e(TAG, "ClientFetchQuery UnknownHostException in Fetching key "+msgs[3]);
+                }
+                catch (SocketTimeoutException e) {
+                    Log.e(TAG, "ClientFetchQuery socket IOException in Fetching key "+msgs[3]);
+                }
+                catch (IOException e) {
+                    Log.e(TAG, "ClientFetchQuery socket IOException in Fetching key "+msgs[3]);
                 }
                 catch (Exception e) {
-                    Log.e(TAG, "Something wrong real wrong while requesting global data");
+                    Log.e(TAG, "Something wrong real wrong while requesting query data");
+                    return tempCursor;
                 }
                 //you can handle device crashes here
 
             }
-
+            Log.d("querycount for key "+msgs[3], "tempcursor "+Integer.toString(tempCursor.getCount()));
             return null;
         }
     }

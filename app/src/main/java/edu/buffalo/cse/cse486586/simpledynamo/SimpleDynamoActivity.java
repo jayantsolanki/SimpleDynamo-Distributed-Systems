@@ -81,7 +81,7 @@ public class SimpleDynamoActivity extends Activity {
 		});
 
 		// for Global Delete button
-		findViewById(R.id.button4).setOnClickListener(new View.OnClickListener()
+		findViewById(R.id.button5).setOnClickListener(new View.OnClickListener()
 		{
 			public void onClick(View v)
 			{
