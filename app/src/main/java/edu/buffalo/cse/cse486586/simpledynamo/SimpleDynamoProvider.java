@@ -256,7 +256,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             db.execSQL("delete from "+table);
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"globalDeleteData", avdId);
             long startTime = System.currentTimeMillis(); //fetch starting time
-            while(false||(System.currentTimeMillis()-startTime)<2000);
+//            while(false||(System.currentTimeMillis()-startTime)<2000);
             return 0;
 
 
@@ -310,7 +310,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                     new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"localDelete", avdId, portMap[getIndex+2], selection);
                 }
 
-                while(false||(System.currentTimeMillis()-startTime)<500);
+//                while(false||(System.currentTimeMillis()-startTime)<500);
 
 
 
@@ -339,7 +339,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                     new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,"localDelete", avdId, portMap[getIndex+2], selection);
                 }
 
-                while(false||(System.currentTimeMillis()-startTime)<500);
+//                while(false||(System.currentTimeMillis()-startTime)<500);
 
             }
 
@@ -351,17 +351,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
 						String sortOrder) {
-//	    while(RESTOREFLAG==0);//wait till restoration is complete
         SQLiteDatabase db = objDbHelper.getReadableDatabase();
-//        if(mode==0)
-//		    matrixCursor = new MatrixCursor(new String[] { "key", "value" });
-////		FLAG = 0;
-//        if(FLAG==0)
-//            Log.d("queryselect on hold", selection);
-////        while(FLAG==0);//hold incoming queries
-//        if(FLAG==1)
-//            Log.d("queryselect released", selection);
-//        FLAG=0;
+
         int getIndex = -1;
 		//no particular order of  results, or columns defined
 		String Selection;
@@ -416,7 +407,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			Selection = "key" + " = ?";
 
             try {
-                getIndex = findHashIndex(genHash(selection));
+                getIndex = findHashIndex(genHash(selection));//find the original node for the hashed key
 //                Log.v("Check position", "For key: "+selection+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
 
             }
@@ -449,7 +440,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                     }
                 }
 
-                FLAG=0;
+//                FLAG=0;
                 try {
                     if (getIndex == 4) {
                         results = new ClientFetchQuery().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, "queryData", avdId, portMap[1], selection).get();
@@ -499,9 +490,6 @@ public class SimpleDynamoProvider extends ContentProvider {
                 catch (Exception e) {
                     Log.e(TAG, "Unknown exception occurrred during selection query");
                 }
-//                while(FLAG==0);
-//                long startTime = System.currentTimeMillis(); //fetch starting time
-//                while(false||(System.currentTimeMillis()-startTime)<100);
                 return results;
 
 
@@ -890,39 +878,39 @@ public class SimpleDynamoProvider extends ContentProvider {
 					Log.e(TAG, "Something wrong real wrong while forwarding data");
 				}
 			}
-			if (msg1.equals("globalData")) {
-				msgToSend.append(":"+msgs[1]);
-//                msgToSend.append(":"+msgs[2]);
-//                receiverPort = msgs[2];
-
-					Log.d(TAG,"Requesting Global Data from all DHT nodes "+msgToSend.toString());
-					for(int i = 0; i<5; i++)
-                    {
-                        try {
-                            if (portMap[i].compareToIgnoreCase(msgs[1]) == 0)
-                                continue;
-                            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                                    Integer.parseInt(portMap[i]) * 2);
-                            ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
-                            output.writeObject(msgToSend.toString());//sending the string object
-                            output.flush();
-                            long startTime = System.currentTimeMillis(); //fetch starting time
-                            while(false||(System.currentTimeMillis()-startTime)<20);
-
-//                        output.close();//this is causing IOexception in server side
-//                            socket.close();//bug bug bug
-                        } catch (UnknownHostException e) {
-                            Log.e(TAG, "ClientTask UnknownHostException");
-                        } catch (IOException e) {
-                            Log.e(TAG, "ClientTask socket IOException");
-                        }
-                        catch (Exception e) {
-                            Log.e(TAG, "Something wrong real wrong while requesting global data");
-                        }
-                    }
-
-
-			}
+//			if (msg1.equals("globalData")) {//phased out for a faster method
+//				msgToSend.append(":"+msgs[1]);
+////                msgToSend.append(":"+msgs[2]);
+////                receiverPort = msgs[2];
+//
+//					Log.d(TAG,"Requesting Global Data from all DHT nodes "+msgToSend.toString());
+//					for(int i = 0; i<5; i++)
+//                    {
+//                        try {
+//                            if (portMap[i].compareToIgnoreCase(msgs[1]) == 0)
+//                                continue;
+//                            Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+//                                    Integer.parseInt(portMap[i]) * 2);
+//                            ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
+//                            output.writeObject(msgToSend.toString());//sending the string object
+//                            output.flush();
+//                            long startTime = System.currentTimeMillis(); //fetch starting time
+//                            while(false||(System.currentTimeMillis()-startTime)<20);
+//
+////                        output.close();//this is causing IOexception in server side
+////                            socket.close();//bug bug bug
+//                        } catch (UnknownHostException e) {
+//                            Log.e(TAG, "ClientTask UnknownHostException");
+//                        } catch (IOException e) {
+//                            Log.e(TAG, "ClientTask socket IOException");
+//                        }
+//                        catch (Exception e) {
+//                            Log.e(TAG, "Something wrong real wrong while requesting global data");
+//                        }
+//                    }
+//
+//
+//			}
             if (msg1.equals("sendingData")) {//sending the localdata to the called avd
                 msgToSend.append(":"+msgs[2]);
                 msgToSend.append(":"+msgs[3]);
@@ -1045,13 +1033,8 @@ public class SimpleDynamoProvider extends ContentProvider {
                     String []msgArray = msg.split(":");
                     Log.d(TAG,"Adding key: "+msgArray[2]+" to matrixcursor");
                     tempCursor.addRow(new Object[] { msgArray[2], msgArray[3] });
-                    FLAG = 1;
+//                    FLAG = 1;
                     return tempCursor;
-//                    output.flush();
-
-//					long startTime = System.currentTimeMillis(); //fetch starting time
-//					while(false||(System.currentTimeMillis()-startTime)<20);
-//					socket.close();//bug bug bug
 
                 } catch (UnknownHostException e) {
                     Log.e(TAG, "ClientFetchQuery UnknownHostException in Fetching key "+msgs[3]);
@@ -1157,8 +1140,8 @@ public class SimpleDynamoProvider extends ContentProvider {
         }
     }
     /***
-     * ClientTask is an AsyncTask that should send a string over the network.
-     * It is created by ClientTask.executeOnExecutor() call whenever OnKeyListener.onKey() detects
+     * ClientFetchGlobalTask is an AsyncTask that should send a string over the network.
+     * Intitated for * query
      * an enter key press event.
      *
      * @author stevko
@@ -1176,15 +1159,13 @@ public class SimpleDynamoProvider extends ContentProvider {
                 int getIndex = -1;
 
                 Log.d(TAG, "Starting Global Fetching ");
-                StringBuffer msgToSend = new StringBuffer("restoreData");
+                StringBuffer msgToSend = new StringBuffer("restoreData");//exploiting restore method
                 msgToSend.append(":"+avdId);
                 SQLiteDatabase db = objDbHelper.getWritableDatabase();//important
                 for(int i = 0; i<5; i++)
                 {
                     Log.d("Iterating" ,"Port "+ portMap[i]);
                     try {
-//                        if (portMap[i].compareToIgnoreCase(avdId) == 0)
-//                            continue;
                         Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                 Integer.parseInt(portMap[i]) * 2);
                         ObjectOutputStream output = new ObjectOutputStream(socket.getOutputStream());//creating the outputstream for sending the objectified version of the string message received from the textbox
@@ -1197,8 +1178,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                                 String []msgArray = msg.split(":");
                                 if(msgArray[0].compareToIgnoreCase("Null")!=0)
                                 {
-                                    getIndex = findHashIndex(genHash(msgArray[2]));
-                                    Boolean check = checkPosition(getIndex);
+
 //                                        Log.v("Check position status: "+Boolean.toString(checkPosition(getIndex)), "For key: "+msgArray[2]+" Index found is "+Integer.toString(getIndex)+" and current Node index is "+Integer.toString(nodeIndex));
                                     Log.d(TAG, "Returned values for global query "+msgArray[2]+" "+msgArray[3]);
 
@@ -1216,12 +1196,6 @@ public class SimpleDynamoProvider extends ContentProvider {
                             Log.e("Coming out of loop","yeah");
                         }
 
-
-
-//                            long startTime = System.currentTimeMillis(); //fetch starting time
-//                            while(false||(System.currentTimeMillis()-startTime)<20);
-//                        output.close();//this is causing IOexception in server side
-//                            socket.close();//bug bug bug
                     } catch (UnknownHostException e) {
                         Log.e(TAG, "ClientGlobalFetchTask UnknownHostException");
                     } catch (IOException e) {
